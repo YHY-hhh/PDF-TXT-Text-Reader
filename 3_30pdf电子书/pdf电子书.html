@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>仿真翻页 + 自动下滑阅读器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/build/pdf.min.js"></script>
+    <style>
+        :root {
+            --bg: #f3f0eb;
+            --page: #fffefb;
+            --text: #222;
+            --shadow: rgba(0,0,0,0.15);
+            --toc-text: #333;
+            --toc-page: #666;
+        }
+        .dark {
+            --bg: #1a11a1;
+            --page: #2b2b2b;
+            --text: #eee;
+            --shadow: rgba(0,0,0,0.4);
+            --toc-text: #eee;
+            --toc-page: #aaa;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            transition: all 0.3s ease;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            overflow-x: hidden;
+        }
+
+        .reader-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 8px;
+        }
+
+        .book-wrapper {
+            width: 100%;
+            max-width: 1700px;
+            height: 85vh;
+            position: relative;
+            perspective: 3000px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .book {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            gap: 1.5%;
+        }
+
+        .page {
+            position: relative;
+            width: 48%;
+            height: 100%;
+            background: var(--page);
+            box-shadow: 0 6px 20px var(--shadow);
+            border-radius: 6px;
+            overflow: hidden;
+            backface-visibility: hidden;
+            transition: transform 0.8s cubic-bezier(0.25, 0.8, 0.3, 1);
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        .page-left {
+            transform-origin: right center;
+            border-right: 1px solid rgba(0,0,0,0.05);
+        }
+        .page-right {
+            transform-origin: left center;
+            border-left: 1px solid rgba(0,0,0,0.05);
+        }
+        .page.flip-left {
+            transform: rotateY(178deg) scale(0.96);
+            box-shadow: -15px 8px 30px var(--shadow);
+        }
+        .page.flip-right {
+            transform: rotateY(-178deg) scale(0.96);
+            box-shadow: 15px 8px 30px var(--shadow);
+        }
+
+        .page-content {
+            width: 90%;
+            padding: 40px 48px;
+            font-size: 20px;
+            line-height: 2;
+            white-space: pre-wrap;
+            word-break: break-all;
+            text-align: justify;
+        }
+
+        .book.single {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .book.single .page-left {
+            width: 100%;
+            height: 100%;
+            margin: 0 auto;
+        }
+        .book.single .page-right {
+            display: none;
+        }
+
+        .scroll-reader {
+            width: 100%;
+            max-width: 1000px;
+            height: 85vh;
+            background: var(--page);
+            border-radius: 8px;
+            box-shadow: 0 6px 20px var(--shadow);
+            padding: 40px 48px;
+            font-size: 20px;
+            line-height: 2;
+            white-space: pre-wrap;
+            word-break: break-all;
+            text-align: justify;
+            margin: 0 auto 8px;
+            overflow-x: hidden;
+            overflow-y: auto;
+            display: none;
+            scroll-behavior: auto !important;
+        }
+
+        .control-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+            width: 100%;
+        }
+        .page-jump {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: var(--page);
+            border-radius: 10px;
+            box-shadow: 0 3px 10px var(--shadow);
+        }
+        .page-jump span {
+            font-size: 14px;
+        }
+        .page-jump input {
+            width: 60px;
+            padding: 5px 6px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background: var(--bg);
+            color: var(--text);
+            text-align: center;
+            outline: none;
+        }
+        .page-jump button {
+            padding: 5px 10px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .control-btn {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .control-btn button {
+            padding: 6px 12px;
+            background: #1f2937;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .auto-scroll-panel {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            background: var(--page);
+            border-radius: 8px;
+            box-shadow: 0 3px 10px var(--shadow);
+            font-size: 14px;
+        }
+        .auto-scroll-panel input[type="range"] {
+            width: 100px;
+        }
+        .auto-scroll-panel button {
+            padding: 4px 8px;
+            background: #10b982;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .mode-switch {
+            padding: 6px 10px;
+            background: var(--page);
+            border-radius: 8px;
+            box-shadow: 0 3px 10px var(--shadow);
+            font-size: 14px;
+            display: flex;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+        .mode-switch button {
+            padding: 4px 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #d1d5db;
+        }
+        .mode-switch button.active {
+            background: #3b82f6;
+            color: white;
+        }
+        .toc-sidebar {
+            position: fixed;
+            top: 0;
+            left: -280px;
+            width: 280px;
+            height: 100vh;
+            background: var(--page);
+            box-shadow: 4px 0 15px var(--shadow);
+            transition: left 0.3s ease;
+            z-index: 999;
+            padding: 20px 12px;
+            overflow-y: auto;
+        }
+        .toc-sidebar.open { left: 0; }
+        .toc-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .toc-item {
+            padding: 8px 10px;
+            border-radius: 6px;
+            margin: 3px 0;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .toc-item:hover {
+            background: rgba(0,0,0,0.05);
+        }
+        .dark .toc-item:hover {
+            background: rgba(255,255,255,0.05);
+        }
+        .toc-page-num {
+            font-size: 12px;
+            color: var(--toc-page);
+        }
+        .toc-toggle {
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            z-index: 1000;
+            padding: 6px 10px;
+            background: var(--page);
+            border: none;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px var(--shadow);
+            cursor: pointer;
+        }
+        .upload-area {
+            width: 90%;
+            max-width: 700px;
+            border: 2px dashed #ccc;
+            border-radius: 12px;
+            padding: 60px 20px;
+            text-align: center;
+            cursor: default;
+            transition: all 0.3s;
+            margin-top: 50px;
+        }
+        .upload-area:hover {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 254, 0.05);
+        }
+        .upload-icon {
+            font-size: 50px;
+            color: #3b82f6;
+            margin-bottom: 15px;
+        }
+        .upload-btn {
+            padding: 10px 20px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        #file-input { display: none; }
+        .book-switch-panel {
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            z-index: 998;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .book-select {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: none;
+            background: var(--page);
+            color: var(--text);
+            box-shadow: 0 2px 8px var(--shadow);
+            outline: none;
+            min-width: 140px;
+        }
+        .add-book-btn {
+            padding: 6px 10px;
+            background: #10b982;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <button class="toc-toggle" onclick="document.getElementById('tocSidebar').classList.toggle('open')">
+        <i class="fa fa-list"></i>
+    </button>
+    <div class="book-switch-panel">
+        <select id="bookSelector" class="book-select" onchange="switchBook()">
+            <option value="">请选择图书</option>
+        </select>
+        <button class="add-book-btn" onclick="document.getElementById('file-input').click()">
+            <i class="fa fa-plus"></i> 添加图书
+        </button>
+    </div>
+    <div id="tocSidebar" class="toc-sidebar">
+        <div class="toc-title"><i class="fa fa-bookmark"></i> 章节目录</div>
+        <div id="tocList"></div>
+    </div>
+
+    <div class="reader-container">
+        <h1 class="text-xl md:text-2xl font-bold mb-1">📖 智能阅读器</h1>
+        <div id="uploadArea" class="upload-area">
+            <div class="upload-icon"><i class="fa fa-cloud-upload"></i></div>
+            <div class="mb-3">上传 TXT / PDF 文件开始阅读</div>
+            <input type="file" id="file-input" accept=".txt,.pdf" multiple>
+            <button class="upload-btn" onclick="openFile()">选择文件</button>
+        </div>
+
+        <div id="readingArea" class="hidden w-full flex flex-col items-center">
+            <div class="mode-switch">
+                <button id="modeSingle">单面阅读</button>
+                <button id="modeDouble" class="active">双面翻页</button>
+                <button id="modeScroll">下滑模式</button>
+            </div>
+
+            <div class="book-wrapper" id="bookWrap">
+                <div class="book" id="book">
+                    <div class="page page-left" id="leftPage">
+                        <div class="page-content" id="leftContent"></div>
+                    </div>
+                    <div class="page page-right" id="rightPage">
+                        <div class="page-content" id="rightContent"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="scroll-reader" id="scrollWrap"></div>
+
+            <div class="control-bar">
+                <div class="page-jump">
+                    <span>当前：<span id="currentPage">1</span></span>
+                    <input type="number" id="jumpInput" placeholder="页码" min="1">
+                    <button onclick="jumpToPage()">跳转</button>
+                    <span>共 <span id="totalPage">0</span> 页</span>
+                </div>
+                <div class="auto-scroll-panel">
+                    <span>速度</span>
+                    <input type="range" id="scrollSpeed" min="1" max="20" value="5">
+                    <button id="autoScrollBtn">开始自动阅读</button>
+                </div>
+                <div class="control-btn">
+                    <button id="prevBtn"><i class="fa fa-arrow-left"></i> 上一页</button>
+                    <button id="nextBtn">下一页 <i class="fa fa-arrow-right"></i></button>
+                    <button id="darkModeBtn"><i class="fa fa-moon-o"></i> 夜间模式</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/build/pdf.worker.min.js";
+        const $ = s => document.querySelector(s);
+
+        let bookList = [];
+        let currentBookIndex = -1;
+        let bookProgress = {};
+        let chapterData = { titles: [], chunks: [] };
+        let currentChapter = 0;
+        let isPDF = false, pdfDoc = null;
+        let viewMode = 'double';
+        let autoScrollFrame = null;
+        let isAutoScroll = false;
+
+        const fileInput = $("#file-input");
+
+        // 只有点击【选择文件】按钮才触发
+        function openFile() {
+            fileInput.value = "";
+            fileInput.click();
+        }
+
+        fileInput.addEventListener("change", async (e) => {
+            const files = Array.from(e.target.files);
+            if (!files.length) return;
+            for (let file of files) await loadBook(file);
+            $("#uploadArea").classList.add("hidden");
+            $("#readingArea").classList.remove("hidden");
+            renderBookSelector();
+        });
+
+        async function loadBook(file) {
+            const bookName = file.name;
+            if (bookList.some(b => b.name === bookName)) {
+                alert(`${bookName} 已存在`);
+                return;
+            }
+            const bookData = {
+                name: bookName,
+                file,
+                isPDF: file.name.endsWith('.pdf'),
+                pdfDoc: null,
+                chapterData: null
+            };
+            if (bookData.isPDF) {
+                try {
+                    const buf = await file.arrayBuffer();
+                    bookData.pdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
+                    bookData.chapterData = {
+                        titles: Array.from({ length: bookData.pdfDoc.numPages }, (_, i) => `PDF 第${i+1}页`),
+                        chunks: Array.from({ length: bookData.pdfDoc.numPages }, (_, i) => i + 1)
+                    };
+                } catch (err) {
+                    alert("PDF加载失败：" + err.message);
+                    return;
+                }
+            } else {
+                const txt = await file.text();
+                bookData.chapterData = smartSplitChapter(txt);
+            }
+            bookList.push(bookData);
+            bookProgress[bookName] = 0;
+            currentBookIndex = bookList.length - 1;
+            loadCurrentBook();
+        }
+
+        function renderBookSelector() {
+            const sel = $("#bookSelector");
+            sel.innerHTML = '<option value="">选择图书</option>';
+            bookList.forEach((book, idx) => {
+                const opt = document.createElement("option");
+                opt.value = idx;
+                opt.textContent = book.name;
+                if (idx === currentBookIndex) opt.selected = true;
+                sel.appendChild(opt);
+            });
+        }
+
+        function switchBook() {
+            const idx = parseInt($("#bookSelector").value);
+            if (isNaN(idx) || idx < 0 || idx >= bookList.length) return;
+            currentBookIndex = idx;
+            loadCurrentBook();
+        }
+
+        function loadCurrentBook() {
+            if (currentBookIndex < 0) return;
+            stopAutoScroll();
+            const book = bookList[currentBookIndex];
+            isPDF = book.isPDF;
+            pdfDoc = book.pdfDoc;
+            chapterData = book.chapterData;
+            currentChapter = bookProgress[book.name];
+            generateTOC();
+            renderAll();
+        }
+
+        $("#modeSingle").onclick = () => {
+            viewMode = 'single';
+            $("#book").className = "book single";
+            $("#bookWrap").style.display = "flex";
+            $("#scrollWrap").style.display = "none";
+            document.querySelectorAll('.mode-switch button').forEach(b=>b.classList.remove('active'));
+            $("#modeSingle").classList.add('active');
+            renderAll();
+        };
+
+        $("#modeDouble").onclick = () => {
+            viewMode = 'double';
+            $("#book").className = "book";
+            $("#bookWrap").style.display = "flex";
+            $("#scrollWrap").style.display = "none";
+            document.querySelectorAll('.mode-switch button').forEach(b=>b.classList.remove('active'));
+            $("#modeDouble").classList.add('active');
+            renderAll();
+        };
+
+        $("#modeScroll").onclick = () => {
+            viewMode = 'scroll';
+            $("#bookWrap").style.display = "none";
+            $("#scrollWrap").style.display = "block";
+            document.querySelectorAll('.mode-switch button').forEach(b=>b.classList.remove('active'));
+            $("#modeScroll").classList.add('active');
+            renderScroll();
+        };
+
+        function smartSplitChapter(text) {
+            const lines = text.split(/\n+/);
+            const titles = [], chunks = [];
+            let tmp = "";
+            const reg = /^(第[0-9一二三四五六七八九十百千]+[章节]|前言|序言|后记|附录|摘要|引言)/i;
+            lines.forEach(line => {
+                if (reg.test(line.trim()) && line.length < 40) {
+                    if (tmp.trim()) {
+                        chunks.push(tmp);
+                        titles.push(line.trim());
+                        tmp = "";
+                    }
+                }
+                tmp += line + "\n";
+            });
+            if (tmp.trim()) {
+                chunks.push(tmp);
+                titles.push("正文");
+            }
+            return { titles, chunks };
+        }
+
+        function generateTOC() {
+            const wrap = $("#tocList");
+            wrap.innerHTML = "";
+            chapterData.titles.forEach((title, i) => {
+                const div = document.createElement("div");
+                div.className = "toc-item";
+                div.innerHTML = `<span>${title}</span><span class="toc-page-num">第${i+1}页</span>`;
+                div.onclick = () => {
+                    currentChapter = i;
+                    if (currentBookIndex >= 0) bookProgress[bookList[currentBookIndex].name] = currentChapter;
+                    renderAll();
+                    $("#tocSidebar").classList.remove("open");
+                };
+                wrap.appendChild(div);
+            });
+            $("#totalPage").innerText = chapterData.titles.length;
+        }
+
+        function renderAll() {
+            $("#currentPage").innerText = currentChapter + 1;
+            if (viewMode === 'scroll') return renderScroll();
+            renderBook();
+        }
+
+        async function renderBook() {
+            const L = $("#leftContent"), R = $("#rightContent");
+            L.innerHTML = ""; R.innerHTML = "";
+            const total = chapterData.titles.length;
+            if (isPDF) {
+                await pdfRender(L, currentChapter);
+                if (viewMode === 'double' && currentChapter + 1 < total) await pdfRender(R, currentChapter + 1);
+            } else {
+                L.innerText = chapterData.chunks[currentChapter];
+                if (viewMode === 'double' && currentChapter + 1 < total) R.innerText = chapterData.chunks[currentChapter + 1];
+            }
+        }
+
+        async function renderScroll() {
+            const el = $("#scrollWrap");
+            el.innerHTML = "";
+            if (isPDF) {
+                for (let i = 0; i < pdfDoc.numPages; i++) {
+                    const div = document.createElement("div");
+                    div.style.margin = "0 auto";
+                    await pdfRender(div, i);
+                    el.appendChild(div);
+                }
+            } else {
+                el.innerText = chapterData.chunks.join("\n\n\n");
+            }
+        }
+
+        async function pdfRender(container, idx) {
+            const p = await pdfDoc.getPage(idx + 1);
+            const cv = document.createElement("canvas");
+            const ctx = cv.getContext("2d");
+            const vp = p.getViewport({ scale: 1.3 });
+            cv.width = vp.width; cv.height = vp.height;
+            container.appendChild(cv);
+            await p.render({ canvasContext: ctx, viewport: vp });
+        }
+
+        $("#nextBtn").onclick = () => {
+            const total = chapterData.titles.length;
+            if (viewMode === 'scroll') return;
+            if (viewMode === 'single') {
+                if (currentChapter + 1 >= total) return;
+                currentChapter++;
+            } else {
+                if (currentChapter + 2 >= total) return;
+                $("#rightPage").classList.add("flip-right");
+                setTimeout(() => {
+                    currentChapter += 2;
+                    saveProgress();
+                    $("#rightPage").classList.remove("flip-right");
+                    renderBook();
+                }, 300);
+                return;
+            }
+            saveProgress();
+            renderBook();
+        };
+
+        $("#prevBtn").onclick = () => {
+            if (viewMode === 'scroll') return;
+            if (viewMode === 'single') {
+                if (currentChapter <= 0) return;
+                currentChapter--;
+            } else {
+                if (currentChapter - 2 < 0) return;
+                $("#leftPage").classList.add("flip-left");
+                setTimeout(() => {
+                    currentChapter -= 2;
+                    saveProgress();
+                    $("#leftPage").classList.remove("flip-left");
+                    renderBook();
+                }, 300);
+                return;
+            }
+            saveProgress();
+            renderBook();
+        };
+
+        function saveProgress() {
+            if (currentBookIndex >= 0) bookProgress[bookList[currentBookIndex].name] = currentChapter;
+        }
+
+        function jumpToPage() {
+            const v = parseInt($("#jumpInput").value);
+            const total = chapterData.titles.length;
+            if (!v || v < 1 || v > total) return;
+            currentChapter = v - 1;
+            saveProgress();
+            renderAll();
+            $("#jumpInput").value = "";
+        }
+
+        // 丝滑自动滚动
+        $("#autoScrollBtn").onclick = () => {
+            if (viewMode !== 'scroll') return alert("请先切换到下滑模式");
+            if (isAutoScroll) { stopAutoScroll(); return; }
+
+            isAutoScroll = true;
+            $("#autoScrollBtn").innerText = "暂停阅读";
+            const el = $("#scrollWrap");
+            const speed = parseInt($("#scrollSpeed").value);
+            const minSpeed = 0.2;
+            const maxSpeed = 4.0;
+            const pixelsPerFrame = minSpeed + (speed / 20) * (maxSpeed - minSpeed);
+
+            function scrollStep() {
+                if (!isAutoScroll) return;
+                el.scrollTop += pixelsPerFrame;
+                if (el.scrollHeight - el.scrollTop <= el.clientHeight + 50) {
+                    stopAutoScroll();
+                    return;
+                }
+                autoScrollFrame = requestAnimationFrame(scrollStep);
+            }
+            scrollStep();
+        };
+
+        function stopAutoScroll() {
+            cancelAnimationFrame(autoScrollFrame);
+            isAutoScroll = false;
+            $("#autoScrollBtn").innerText = "开始自动阅读";
+        }
+
+        $("#darkModeBtn").onclick = () => document.body.classList.toggle("dark");
+    </script>
+</body>
+</html>
